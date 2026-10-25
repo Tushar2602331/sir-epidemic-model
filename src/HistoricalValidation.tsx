@@ -1,62 +1,51 @@
-import { useEffect, useMemo, useState } from 'react'
-import { AlertCircle, ExternalLink, LoaderCircle, RefreshCw } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { AlertCircle, ExternalLink, LoaderCircle, RefreshCw, X } from 'lucide-react'
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { peak, type Params, type Point } from './lib/sir'
+import { peak, type Point } from './lib/sir'
 
 const locations = [
-  { id: 'IND', name: 'India' },
-  { id: 'USA', name: 'United States' },
-  { id: 'BRA', name: 'Brazil' },
-  { id: 'GBR', name: 'United Kingdom' }
+  { id: 'IND', name: 'India', x: 692, y: 184, region: 'South Asia' },
+  { id: 'USA', name: 'United States', x: 206, y: 126, region: 'North America' },
+  { id: 'BRA', name: 'Brazil', x: 304, y: 270, region: 'South America' },
+  { id: 'GBR', name: 'United Kingdom', x: 425, y: 112, region: 'Europe' },
+  { id: 'ITA', name: 'Italy', x: 450, y: 137, region: 'Europe' },
+  { id: 'ZAF', name: 'South Africa', x: 486, y: 300, region: 'Africa' },
+  { id: 'JPN', name: 'Japan', x: 775, y: 152, region: 'East Asia' },
+  { id: 'AUS', name: 'Australia', x: 750, y: 320, region: 'Oceania' }
 ]
 const endpoint = 'https://ourworldindata.org/grapher/weekly-covid-cases.csv?v=1&csvType=full&useColumnShortNames=false'
-
+let datasetCache: Promise<string> | null = null
+async function getDataset(refresh = false) { if (refresh || !datasetCache) { datasetCache = fetch(endpoint).then(response => { if (!response.ok) throw new Error('Dataset unavailable'); return response.text() }).catch(error => { datasetCache = null; throw error }) } return datasetCache }
+function formatDate(day: string) { const date = new Date(day + 'T00:00:00'); return Number.isNaN(date.getTime()) ? day : new Intl.DateTimeFormat('en', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(date) }
 function parseLine(line: string) {
   const values: string[] = []; let value = ''; let quoted = false
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index]
-    if (char === '"') { quoted = !quoted; continue }
-    if (char === ',' && !quoted) { values.push(value); value = ''; continue }
-    value += char
-  }
+  for (let index = 0; index < line.length; index += 1) { const char = line[index]; if (char === '"') { quoted = !quoted; continue } if (char === ',' && !quoted) { values.push(value); value = ''; continue } value += char }
   values.push(value); return values
 }
 function parseCsv(text: string, code: string) {
-  const lines = text.trim().split(/\r?\n/)
-  const headings = parseLine(lines[0])
-  const codeIndex = headings.indexOf('Code')
-  const dayIndex = headings.indexOf('Day')
-  const valueIndex = headings.length - 1
-  return lines.slice(1).map(parseLine).filter(row => row[codeIndex] === code).map(row => ({ day: row[dayIndex], observed: Number(row[valueIndex]) || 0 })).filter(row => row.observed > 0)
+  const lines = text.trim().split(/\r?\n/); const headings = parseLine(lines[0]); const codeIndex = headings.indexOf('Code'); const dayIndex = headings.indexOf('Day'); const valueIndex = headings.length - 1
+  return lines.slice(1).map(parseLine).filter(row => row[codeIndex] === code).map(row => ({ day: row[dayIndex], observed: row[valueIndex]?.trim() === '' ? Number.NaN : Number(row[valueIndex]) })).filter(row => row.day && Number.isFinite(row.observed))
 }
-
 export function HistoricalValidation({ simulation }: { simulation: Point[] }) {
-  const [country, setCountry] = useState('IND')
-  const [records, setRecords] = useState<Array<{ day: string; observed: number }>>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const load = async () => {
-    setLoading(true); setError('')
-    try {
-      const response = await fetch(endpoint)
-      if (!response.ok) throw new Error('Dataset unavailable')
-      setRecords(parseCsv(await response.text(), country))
-    } catch { setError('Live source could not be reached. Check your connection, then retry.') }
-    finally { setLoading(false) }
-  }
+  const requestId = useRef(0)
+  const [country, setCountry] = useState('IND'); const [window, setWindow] = useState<'recent' | 'early' | 'all'>('recent'); const [records, setRecords] = useState<Array<{ day: string; observed: number }>>([]); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [selectedDay, setSelectedDay] = useState(''); const [showRecord, setShowRecord] = useState(false)
+  const location = locations.find(item => item.id === country) ?? locations[0]
+  const load = async (refresh = false) => { const id = ++requestId.current; setLoading(true); setError(''); setRecords([]); try { const text = await getDataset(refresh); const parsed = parseCsv(text, country); if (id === requestId.current) setRecords(parsed) } catch { if (id === requestId.current) setError('Live source could not be reached. Check your connection, then retry.') } finally { if (id === requestId.current) setLoading(false) } }
   useEffect(() => { void load() }, [country])
-  const rows = useMemo(() => {
-    const selected = records.slice(0, Math.min(160, records.length))
-    if (!selected.length) return []
-    const observedPeak = Math.max(...selected.map(row => row.observed))
-    const simulationPeak = peak(simulation).I || 1
-    return selected.map((row, index) => ({ label: index + 1, reported: row.observed, model: (simulation[Math.min(index, simulation.length - 1)]?.I ?? 0) / simulationPeak * observedPeak }))
-  }, [records, simulation])
-  const nrmse = useMemo(() => {
-    if (!rows.length) return null
-    const maximum = Math.max(...rows.map(row => row.reported)) || 1
-    const mse = rows.reduce((sum, row) => sum + Math.pow(row.reported - row.model, 2), 0) / rows.length
-    return Math.sqrt(mse) / maximum
-  }, [rows])
-  return <div className="validation-panel"><div className="validation-toolbar"><div><p className="eyebrow">LIVE REFERENCE DATA</p><h3>Historical COVID-19 weekly comparison</h3><p>WHO-reported weekly cases are compared with the simulated curve after peak normalisation.</p></div><label>Location<select value={country} onChange={event => setCountry(event.target.value)}>{locations.map(location => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label><button type="button" onClick={() => void load()} aria-label="Refresh live source"><RefreshCw size={16}/> Refresh</button></div>{loading ? <p className="source-state"><LoaderCircle size={17}/> Loading the current OWID dataset…</p> : error ? <p className="source-state source-error"><AlertCircle size={17}/>{error}</p> : <><div className="validation-chart"><ResponsiveContainer width="100%" height={310}><LineChart data={rows}><CartesianGrid strokeDasharray="3 3" stroke="var(--grid)"/><XAxis dataKey="label" label={{ value: 'weeks after first reported case', position: 'insideBottom', offset: -3 }}/><YAxis/><Tooltip/><Legend/><Line dataKey="reported" name="Reported weekly cases" stroke="#2ac4e8" strokeWidth={2.5} dot={false}/><Line dataKey="model" name="SIR infected shape" stroke="#ff9f43" strokeWidth={2.5} strokeDasharray="6 5" dot={false}/></LineChart></ResponsiveContainer></div><div className="validation-notes"><span><b>Sample</b>{rows.length} observed weeks</span><span><b>Normalised RMSE</b>{nrmse === null ? '—' : nrmse.toFixed(3)}</span><span><b>Source</b><a href="https://ourworldindata.org/grapher/weekly-covid-cases" target="_blank" rel="noreferrer">OWID / WHO <ExternalLink size={13}/></a></span></div><p className="validation-disclaimer">This is a transparent shape comparison, not a clinical fit: reported confirmed cases depend on testing and reporting, whereas SIR I(t) represents active infections. Use it to assess qualitative timing and curve shape; formal calibration requires fitting beta, gamma, reporting rate, and initial conditions to a chosen window.</p></>}</div>
+  useEffect(() => { if (records.length) setSelectedDay(records[records.length - 1].day) }, [records])
+  const rows = useMemo(() => { const selected = window === 'all' ? records : window === 'early' ? records.slice(0, 52) : records.slice(-52); if (!selected.length) return []; const observedPeak = Math.max(1, ...selected.map(row => Math.abs(row.observed))); const simulationPeak = peak(simulation).I || 1; return selected.map((row, index) => { const modelIndex = Math.round(index / Math.max(1, selected.length - 1) * (simulation.length - 1)); return { label: index + 1, date: row.day, reported: row.observed, model: (simulation[modelIndex]?.I ?? 0) / simulationPeak * observedPeak } }) }, [records, simulation, window])
+  const nrmse = useMemo(() => { if (!rows.length) return null; const maximum = Math.max(1, ...rows.map(row => Math.abs(row.reported))); return Math.sqrt(rows.reduce((sum, row) => sum + Math.pow(row.reported - row.model, 2), 0) / rows.length) / maximum }, [rows])
+  const record = records.find(row => row.day === selectedDay) ?? records[records.length - 1]
+  return <div className="validation-panel">
+    <div className="validation-toolbar"><div><p className="eyebrow">LIVE REFERENCE DATA</p><h3>COVID-19 reports by affected region</h3><p>Select a highlighted region and reporting window. The graph updates to compare that published record window with the current model shape.</p></div><div className="validation-actions"><label>Comparison period<select value={window} onChange={event => setWindow(event.target.value as typeof window)}><option value="recent">Most recent 52 weeks</option><option value="early">First 52 weeks</option><option value="all">All available reports</option></select></label><button type="button" onClick={() => void load(true)} aria-label="Refresh live source"><RefreshCw size={16}/> Refresh data</button></div></div>
+    <div className="validation-map-layout"><div className="world-map-card"><div className="map-topline"><span>WORLDWIDE REPORTING MAP</span><span><i/> WHO-reported cases</span></div><svg className="world-map" viewBox="0 0 900 400" role="img" aria-label="Interactive world map. Select a highlighted region">
+      <defs><linearGradient id="landGlow" x1="0" x2="1"><stop stopColor="#12506a"/><stop offset="1" stopColor="#347f8d"/></linearGradient><filter id="mapGlow"><feGaussianBlur stdDeviation="4" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+      <path className="map-land" d="M73 87l35-30 66-11 35 19 53 3 32 37-13 31-36 8-18 30-31-2-18 27-29-15-15-36-27-9-20-29-22-2-9-21zm144 106l24 8 21 29-2 33-16 31-7 41-20 17-13-22-3-42-15-27 9-33zm170-152l51-21 61 7 35 27-15 28-50 8-27 18-34-12-32 7-24-22 12-25zm74 85l39-17 50 10 35 27 44 3 20 22-19 17-42-8-28 21-41-7-24 21-29-7-18-32-32-12-17-25zm64 86l41-2 33 14 27 32-8 34-29 26-30-10-9-28-36-19-12-24zm125-89l25-20 38 8 14 21-19 22-34-5zm-85-39l19-13 19 12-6 24-22 2z"/>
+      <path className="map-grid" d="M20 100H880M20 200H880M20 300H880M150 25V375M300 25V375M450 25V375M600 25V375M750 25V375"/>
+      {locations.map(item => <g key={item.id} className={'map-marker ' + (country === item.id ? 'map-marker-active' : '')} role="button" tabIndex={0} aria-label={`Inspect ${item.name} reports`} onClick={() => { setCountry(item.id); setShowRecord(true) }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { setCountry(item.id); setShowRecord(true) } }}><circle className="marker-pulse" cx={item.x} cy={item.y} r="13"/><circle className="marker-core" cx={item.x} cy={item.y} r="5"/><text x={item.x + 11} y={item.y - 9}>{item.name}</text></g>)}
+    </svg><div className="map-region-chips">{locations.map(item => <button key={item.id} className={country === item.id ? 'region-active' : ''} onClick={() => { setCountry(item.id); setShowRecord(true) }} type="button">{item.name}</button>)}</div></div>
+      <aside className="region-summary"><p className="eyebrow">SELECTED AREA</p><h3>{location.name}</h3><p>{location.region} · weekly confirmed COVID-19 cases</p><div className="region-stat"><span>Available records</span><b>{loading ? 'Loading…' : records.length.toLocaleString()}</b></div><div className="region-stat"><span>Reported weeks plotted</span><b>{rows.length}</b></div><button className="small-primary" disabled={loading || !records.length} onClick={() => setShowRecord(true)} type="button">Open dated records</button><p className="map-source">Source: Our World in Data series based on WHO reports.</p></aside></div>
+    {loading ? <p className="source-state"><LoaderCircle size={17}/> Loading the current OWID dataset…</p> : error ? <p className="source-state source-error"><AlertCircle size={17}/>{error}</p> : <><div className="validation-chart"><ResponsiveContainer width="100%" height={310}><LineChart data={rows}><CartesianGrid strokeDasharray="3 3" stroke="var(--grid)"/><XAxis dataKey="label" label={{ value: window === 'recent' ? 'reported week · recent 52' : window === 'early' ? 'reported week · first 52' : 'reported week · all', position: 'insideBottom', offset: -3 }}/><YAxis/><Tooltip labelFormatter={(_, payload) => payload?.[0]?.payload?.date ?? ''}/><Legend/><Line dataKey="reported" name="Reported weekly cases" stroke="#2ac4e8" strokeWidth={2.5} dot={false}/><Line dataKey="model" name="SIR infected shape · peak-scaled" stroke="#ff9f43" strokeWidth={2.5} strokeDasharray="6 5" dot={false}/></LineChart></ResponsiveContainer></div><div className="validation-notes"><span><b>Sample</b>{rows.length} observed weeks</span><span><b>Normalised RMSE</b>{nrmse === null ? '—' : nrmse.toFixed(3)}</span><span><b>Source</b><a href="https://ourworldindata.org/grapher/weekly-covid-cases" target="_blank" rel="noreferrer">OWID / WHO <ExternalLink size={13}/></a></span></div><p className="validation-disclaimer">This is a curve-shape comparison, not a clinical fit: confirmed reports depend on testing and reporting, while SIR I(t) represents active infections. The displayed record dates and counts are from the selected reporting series.</p></>}
+    {showRecord && <div className="record-backdrop" role="presentation" onMouseDown={event => event.target === event.currentTarget && setShowRecord(false)}><section className="record-sheet" role="dialog" aria-modal="true" aria-labelledby="record-title"><header><div><p className="eyebrow">IN-TAB HISTORICAL RECORD</p><h3 id="record-title">{location.name} · reported COVID-19 cases</h3></div><button type="button" aria-label="Close record details" onClick={() => setShowRecord(false)}><X size={18}/></button></header>{loading ? <p className="source-state"><LoaderCircle size={17}/> Loading this region reports…</p> : records.length > 0 ? <><label className="record-date">Reporting date<select value={record?.day ?? ''} onChange={event => setSelectedDay(event.target.value)}>{records.map(row => <option key={row.day} value={row.day}>{formatDate(row.day)}</option>)}</select></label><div className="record-value"><span>Weekly new confirmed cases</span><b>{record?.observed.toLocaleString() ?? '—'}</b><small>{record ? formatDate(record.day) : ''}</small></div><div className="record-context"><span>Area <b>{location.name}</b></span><span>Measure <b>Weekly new confirmed cases</b></span><span>Dataset <b>OWID Grapher · WHO sourced</b></span></div><a href="https://ourworldindata.org/grapher/weekly-covid-cases" target="_blank" rel="noreferrer">Open dataset and methodology <ExternalLink size={14}/></a></> : <p className="source-state">No reported rows are available for this selection.</p>}</section></div>}
+  </div>
 }

@@ -13,12 +13,25 @@ const derivative = (state: number[], params: Params): number[] => {
   return [-infection, infection - params.gamma * I, params.gamma * I]
 }
 
-function rk4(state: number[], step: number, params: Params) {
+function rk4Stages(state: number[], step: number, params: Params) {
   const k1 = derivative(state, params)
   const k2 = derivative(state.map((value, index) => value + step * k1[index] / 2), params)
   const k3 = derivative(state.map((value, index) => value + step * k2[index] / 2), params)
   const k4 = derivative(state.map((value, index) => value + step * k3[index]), params)
-  return state.map((value, index) => Math.max(0, value + step * (k1[index] + 2 * k2[index] + 2 * k3[index] + k4[index]) / 6))
+  const next = state.map((value, index) => Math.max(0, value + step * (k1[index] + 2 * k2[index] + 2 * k3[index] + k4[index]) / 6))
+  return { k1, k2, k3, k4, next }
+}
+function rk4(state: number[], step: number, params: Params) { return rk4Stages(state, step, params).next }
+
+export function diagnoseRK4Step(point: Point, params: Params, step = 0.1) {
+  const state = params.model === 'SEIR' ? [point.S, point.E, point.I, point.R] : [point.S, point.I, point.R]
+  const stages = rk4Stages(state, step, params)
+  const infectedIndex = params.model === 'SEIR' ? 2 : 1
+  const infectedStages = [stages.k1, stages.k2, stages.k3, stages.k4].map(stage => stage[infectedIndex])
+  const next = params.model === 'SEIR'
+    ? { day: point.day + step, S: stages.next[0], E: stages.next[1], I: stages.next[2], R: stages.next[3] }
+    : { day: point.day + step, S: stages.next[0], E: 0, I: stages.next[1], R: stages.next[2] }
+  return { step, infectedStages, next }
 }
 
 export function simulate(params: Params): Point[] {
