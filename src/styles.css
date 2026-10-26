@@ -193,3 +193,18 @@
 .workspace-flow{height:auto;min-height:0;width:100%;position:relative;z-index:1;display:grid;align-items:stretch;justify-content:initial;align-content:start;overflow:visible;border:1px solid #34515c;border-radius:14px}.workspace-flow .flow-heading b{color:#e8f2f4}.ambient-globe{opacity:.18;filter:blur(2.6px) drop-shadow(0 0 28px #44cdbc30)}.ambient-virus{opacity:.14;filter:blur(2px) drop-shadow(0 0 24px #eaa26b28)}[data-theme=light] .ambient-globe,[data-theme=light] .ambient-virus{opacity:.16}
 
 @media(max-width:900px){.view-validation .validation-toolbar>div:first-child{width:100%;flex:0 1 auto}.view-validation .validation-actions{flex:0 1 auto}}
+
+/* Desktop rendering guardrails: prevent transformed 3D surfaces from creating a horizontal page scroll,
+   reserve breathing room for Recharts' long Indian-formatted Y-axis values, and keep the hero KPI strip unified. */
+html,body,#root,.site-view{max-width:100%;overflow-x:clip}
+.hero-metrics{box-sizing:border-box;padding:5px;background:linear-gradient(110deg,#102434ed,#10202be8);border-color:#8fb7c226}
+.hero-metrics>div,.hero-metrics>div:last-child{margin:0;border-radius:8px;border-right:1px solid #ffffff12;background:transparent}
+.hero-metrics>div:last-child{border-right:0}
+[data-theme=light] .hero-metrics{background:linear-gradient(110deg,#102b3bf2,#142b39ed);border-color:#b5e2e033}
+[data-theme=light] .hero-metrics>div{background:transparent;border-color:#ffffff12}
+.view-simulator .chart-area .recharts-wrapper{box-sizing:border-box;padding-left:32px}
+.view-simulator .chart-area .recharts-surface{max-width:100%}
+.impact-chart .recharts-wrapper{box-sizing:border-box;padding-left:34px}
+.impact-chart .recharts-surface{max-width:100%}
+.view-simulator .chart-area .recharts-yAxis .recharts-cartesian-axis-tick-value,.impact-chart .recharts-yAxis .recharts-cartesian-axis-tick-value{font-variant-numeric:tabular-nums}
+@media(max-width:680px){.view-simulator .chart-area .recharts-wrapper{padding-left:14px}.impact-chart .recharts-wrapper{padding-left:16px}.hero-metrics{padding:0}.hero-metrics>div,.hero-metrics>div:last-child{border-radius:0}}
