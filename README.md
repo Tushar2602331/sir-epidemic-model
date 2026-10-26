@@ -1,5 +1,5 @@
 # Epidemic Expert — SIR & SEIR Lab
-
+https://sir-epidemic-model.vercel.app/
 An interactive Engineering Mathematics project for exploring SIR and SEIR epidemic models. It includes an RK4 numerical solver, live differential-equation analysis, scenario comparison, MATLAB code generation, and historical-data validation.
 
 ## Requirements
